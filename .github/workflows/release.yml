@@ -39,6 +39,8 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.rebuild_tag }}
       VERSION: ${{ needs.release-please.outputs.version }}
@@ -67,6 +69,15 @@ jobs:
           cp -R build/Build/Products/Release-iphoneos/Tower.app Payload/
           zip -qry Tower-unsigned.ipa Payload
 
+      - name: Zip dSYM
+        run: |
+          DSYM=build/Build/Products/Release-iphoneos/Tower.app.dSYM
+          if [ -d "$DSYM" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "$DSYM" Tower-${TAG}.dSYM.zip
+          else
+            echo "::warning::no dSYM produced; skipping"
+          fi
+
       - name: Extract IPA metadata
         id: ipa
         run: |
@@ -88,10 +99,22 @@ jobs:
             echo "date=$DATE"
           } | tee -a "$GITHUB_OUTPUT"
 
-      - name: Attach IPA to the release
+      - name: Extract appPermissions from IPA
+        run: python3 .github/scripts/extract_permissions.py Payload/Tower.app permissions.json
+
+      - name: Attest IPA provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: Tower-unsigned.ipa
+
+      - name: Attach assets to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" Tower-unsigned.ipa --clobber
+        run: |
+          gh release upload "$TAG" Tower-unsigned.ipa --clobber
+          if [ -f "Tower-${TAG}.dSYM.zip" ]; then
+            gh release upload "$TAG" "Tower-${TAG}.dSYM.zip" --clobber
+          fi
 
       - name: Patch source.json on main
         env:
@@ -106,23 +129,30 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout -B main origin/main
-          jq --arg ver "$VER" --arg size "$SIZE" --arg sha "$SHA" \
+          jq --slurpfile perms permissions.json \
+             --arg ver "$VER" --arg size "$SIZE" --arg sha "$SHA" \
              --arg min "$MIN_OS" --arg date "$DATE" --arg tag "$TAG" \
              --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Tower-unsigned.ipa" '
-            .apps[0].size = ($size|tonumber)
+            ($perms[0] // {}) as $p
+            | .apps[0].size = ($size|tonumber)
             | .apps[0].versionDate = $date
             | .apps[0].minOSVersion = $min
             | .apps[0].sha256 = $sha
             | .apps[0].downloadURL = $url
-            | .apps[0].versions = ([{
-                version: $ver,
-                date: $date,
-                localizedDescription: ("Release " + $tag + "."),
-                downloadURL: $url,
-                size: ($size|tonumber),
-                minOSVersion: $min,
-                sha256: $sha
-              }] + ((.apps[0].versions // []) | map(select(.version != $ver))))
+            | (if ($p|length) > 0 then .apps[0].appPermissions = $p else . end)
+            | .apps[0].versions = (
+                [{
+                  version: $ver,
+                  date: $date,
+                  localizedDescription: ("Release " + $tag + "."),
+                  downloadURL: $url,
+                  size: ($size|tonumber),
+                  minOSVersion: $min,
+                  sha256: $sha
+                } + (if ($p|length) > 0 then {appPermissions: $p} else {} end)]
+                + ((.apps[0].versions // []) | map(select(.version != $ver)))
+                | .[0:10]
+              )
           ' source.json > source.json.new
           mv source.json.new source.json
           git add source.json

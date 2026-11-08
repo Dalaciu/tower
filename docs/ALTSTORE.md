@@ -41,15 +41,24 @@ automatically. No manual tagging.
 - **Change `PRODUCT_BUNDLE_IDENTIFIER`** if you have the upstream Tower installed from
   the App Store and want them side by side. Same bundle id replaces the store build.
 
-## Xcode version caveat
+## Xcode version
 
-The project targets iOS 26 + Swift 6, which needs Xcode 27. `macos-latest` on GitHub-
-hosted runners may not ship Xcode 27 yet. If `build-ipa` fails at the build step, either:
+`build-ipa` runs on the GitHub-hosted `xcode-27` runner image (iOS 27.1 SDK, Xcode 27),
+which is what this project targets. If GitHub ever retires that image, update the
+`runs-on` value in `.github/workflows/release.yml`.
 
-- wait for a `macos-26` runner image, or
-- build the IPA locally with the script below and attach it to the existing release by
-  hand with `gh release upload vX.Y.Z Tower-unsigned.ipa`. The `source.json` patch step
-  can be re-run by pushing an empty commit to `main`.
+## Rebuilding the IPA for an existing release
+
+If a release's `build-ipa` run failed (e.g. a transient runner issue) and you need to
+rebuild against the same tag without cutting a new version, trigger `Release` manually
+with `rebuild_tag` set to the tag you want:
+
+```sh
+gh workflow run release.yml -f rebuild_tag=v2.1.0
+```
+
+The job re-runs the build step for that tag, re-uploads `Tower-unsigned.ipa` with
+`--clobber`, and re-patches `source.json`.
 
 ## Local unsigned IPA build (fallback)
 

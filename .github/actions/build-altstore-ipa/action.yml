@@ -1,0 +1,172 @@
+name: Build AltStore IPA
+description: >
+  Build an unsigned iOS IPA for an existing release tag, extract AltStore
+  metadata (sha256, min OS, appPermissions), publish SLSA provenance,
+  attach the IPA and dSYM to the GitHub Release, and patch the AltStore
+  source.json manifest with the new entry.
+
+inputs:
+  tag:
+    description: Release tag the IPA is built for (e.g. v2.1.0).
+    required: true
+  version:
+    description: Semver only (e.g. 2.1.0). Derived from tag by stripping the leading "v" when empty.
+    required: false
+    default: ""
+  project:
+    description: Path to the .xcodeproj.
+    required: false
+    default: Tower.xcodeproj
+  scheme:
+    description: Xcode scheme to build.
+    required: false
+    default: Tower
+  app-name:
+    description: Target .app name (before .app).
+    required: false
+    default: Tower
+  source-json:
+    description: Path to the AltStore source.json manifest on the default branch.
+    required: false
+    default: source.json
+  default-branch:
+    description: Branch to commit the source.json patch to.
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: Sync MARKETING_VERSION to tag
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        VERSION: ${{ inputs.version }}
+        PROJECT: ${{ inputs.project }}
+      run: |
+        V="${VERSION:-${TAG#v}}"
+        sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${V};/g" "${PROJECT}/project.pbxproj"
+
+    - name: Build unsigned IPA and zip dSYM
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        PROJECT: ${{ inputs.project }}
+        SCHEME: ${{ inputs.scheme }}
+        APP_NAME: ${{ inputs.app-name }}
+      run: |
+        set -o pipefail
+        xcodebuild \
+          -project "$PROJECT" -scheme "$SCHEME" \
+          -configuration Release -sdk iphoneos \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS="" DEVELOPMENT_TEAM="" \
+          clean build
+        mkdir Payload
+        cp -R "build/Build/Products/Release-iphoneos/${APP_NAME}.app" Payload/
+        zip -qry "${APP_NAME}-unsigned.ipa" Payload
+        DSYM="build/Build/Products/Release-iphoneos/${APP_NAME}.app.dSYM"
+        if [ -d "$DSYM" ]; then
+          ditto -c -k --sequesterRsrc --keepParent "$DSYM" "${APP_NAME}-${TAG}.dSYM.zip"
+        else
+          echo "::warning::no dSYM produced; skipping"
+        fi
+
+    - name: Upload IPA and dSYM as job artifacts
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.app-name }}-${{ inputs.tag }}
+        path: |
+          ${{ inputs.app-name }}-unsigned.ipa
+          ${{ inputs.app-name }}-${{ inputs.tag }}.dSYM.zip
+        if-no-files-found: warn
+        retention-days: 30
+
+    - name: Extract IPA metadata and appPermissions
+      id: ipa
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app-name }}
+      run: |
+        INFO="Payload/${APP_NAME}.app/Info.plist"
+        IPA="${APP_NAME}-unsigned.ipa"
+        VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO")
+        BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO")
+        BID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO")
+        MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$INFO")
+        SIZE=$(stat -f%z "$IPA")
+        SHA=$(shasum -a 256 "$IPA" | cut -d' ' -f1)
+        DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        {
+          echo "version=$VER"
+          echo "build=$BUILD"
+          echo "bundle_id=$BID"
+          echo "min_os=$MIN_OS"
+          echo "size=$SIZE"
+          echo "sha=$SHA"
+          echo "date=$DATE"
+        } | tee -a "$GITHUB_OUTPUT"
+
+        plutil -convert json -o - "$INFO" \
+          | jq '[to_entries[] | select(.key | startswith("NS") and endswith("UsageDescription"))] | from_entries' \
+          > privacy.json
+        ENTS_FILE=$(find . -maxdepth 4 \( -name '__ci__' -o -name 'build' -o -name 'Payload' \) -prune -o -name '*.entitlements' -print 2>/dev/null | head -1)
+        if [ -n "$ENTS_FILE" ]; then
+          plutil -convert json -o - "$ENTS_FILE" \
+            | jq 'keys - ["application-identifier","com.apple.developer.team-identifier"]' \
+            > ents.json
+        else
+          echo '[]' > ents.json
+        fi
+        jq -n --slurpfile p privacy.json --slurpfile e ents.json '
+          ($e[0]) as $ents | ($p[0]) as $priv
+          | (if ($ents|length) > 0 then {entitlements: $ents} else {} end)
+          + (if ($priv|length) > 0 then {privacy: $priv} else {} end)
+        ' > permissions.json
+        echo "appPermissions:"; cat permissions.json
+
+    - name: Attest IPA provenance
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-path: ${{ inputs.app-name }}-unsigned.ipa
+
+    - name: Attach assets to the release and patch source.json
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ inputs.tag }}
+        APP_NAME: ${{ inputs.app-name }}
+        SOURCE_JSON: ${{ inputs.source-json }}
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        VER: ${{ steps.ipa.outputs.version }}
+        SIZE: ${{ steps.ipa.outputs.size }}
+        SHA: ${{ steps.ipa.outputs.sha }}
+        MIN_OS: ${{ steps.ipa.outputs.min_os }}
+        DATE: ${{ steps.ipa.outputs.date }}
+      run: |
+        set -e
+        ASSETS=( "${APP_NAME}-unsigned.ipa" )
+        [ -f "${APP_NAME}-${TAG}.dSYM.zip" ] && ASSETS+=( "${APP_NAME}-${TAG}.dSYM.zip" )
+        gh release upload "$TAG" "${ASSETS[@]}" --clobber
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git fetch origin "$DEFAULT_BRANCH"
+        git checkout -B "$DEFAULT_BRANCH" "origin/${DEFAULT_BRANCH}"
+        jq -f "${GITHUB_ACTION_PATH}/patch-source.jq" \
+           --slurpfile perms permissions.json \
+           --arg ver "$VER" --arg size "$SIZE" --arg sha "$SHA" \
+           --arg min "$MIN_OS" --arg date "$DATE" --arg tag "$TAG" \
+           --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APP_NAME}-unsigned.ipa" \
+           "$SOURCE_JSON" > "${SOURCE_JSON}.new"
+        mv "${SOURCE_JSON}.new" "$SOURCE_JSON"
+        git add "$SOURCE_JSON"
+        if git diff --cached --quiet; then
+          echo "source.json unchanged"
+          exit 0
+        fi
+        git commit -m "chore(source): sync ${TAG} metadata [skip ci]"
+        git push origin "$DEFAULT_BRANCH"

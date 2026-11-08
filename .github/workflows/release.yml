@@ -43,153 +43,25 @@ jobs:
       attestations: write
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.rebuild_tag }}
-      VERSION: ${{ needs.release-please.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Composite action lives on main. Check it out into a side path so
+      # the main workspace can hold the tag source tree without clobbering
+      # the action for rebuild_tag runs that target older tags.
+      - name: Checkout CI action from main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+          path: __ci__
+
+      - name: Checkout tag source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ env.TAG }}
 
-      - name: Sync MARKETING_VERSION to tag
-        run: |
-          V="${VERSION:-${TAG#v}}"
-          sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${V};/g" Tower.xcodeproj/project.pbxproj
-
-      - name: Build unsigned IPA
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project Tower.xcodeproj -scheme Tower \
-            -configuration Release -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS="" DEVELOPMENT_TEAM="" \
-            clean build
-          mkdir Payload
-          cp -R build/Build/Products/Release-iphoneos/Tower.app Payload/
-          zip -qry Tower-unsigned.ipa Payload
-
-      - name: Zip dSYM
-        run: |
-          DSYM=build/Build/Products/Release-iphoneos/Tower.app.dSYM
-          if [ -d "$DSYM" ]; then
-            ditto -c -k --sequesterRsrc --keepParent "$DSYM" Tower-${TAG}.dSYM.zip
-          else
-            echo "::warning::no dSYM produced; skipping"
-          fi
-
-      - name: Upload IPA and dSYM as job artifacts
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: Build + attest + publish
+        uses: ./__ci__/.github/actions/build-altstore-ipa
         with:
-          name: tower-${{ env.TAG }}
-          path: |
-            Tower-unsigned.ipa
-            Tower-${{ env.TAG }}.dSYM.zip
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Extract IPA metadata
-        id: ipa
-        run: |
-          INFO=Payload/Tower.app/Info.plist
-          VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO")
-          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO")
-          BID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO")
-          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$INFO")
-          SIZE=$(stat -f%z Tower-unsigned.ipa)
-          SHA=$(shasum -a 256 Tower-unsigned.ipa | cut -d' ' -f1)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          {
-            echo "version=$VER"
-            echo "build=$BUILD"
-            echo "bundle_id=$BID"
-            echo "min_os=$MIN_OS"
-            echo "size=$SIZE"
-            echo "sha=$SHA"
-            echo "date=$DATE"
-          } | tee -a "$GITHUB_OUTPUT"
-
-      - name: Extract appPermissions from IPA
-        run: |
-          # plutil + jq, both preinstalled on the macOS runner. Reads NS*
-          # usage descriptions from Info.plist, and entitlement keys from
-          # a committed .entitlements file when present (an unsigned build
-          # has no __TEXT,__entitlements section, so source-level is the
-          # only accurate source). Team-identifying entitlements are
-          # dropped so the published source cannot leak a signing team id.
-          plutil -convert json -o - Payload/Tower.app/Info.plist \
-            | jq '[to_entries[] | select(.key | startswith("NS") and endswith("UsageDescription"))] | from_entries' \
-            > privacy.json
-          ENTS_FILE=$(find Tower -maxdepth 3 -name '*.entitlements' | head -1)
-          if [ -n "$ENTS_FILE" ]; then
-            plutil -convert json -o - "$ENTS_FILE" \
-              | jq 'keys - ["application-identifier","com.apple.developer.team-identifier"]' \
-              > ents.json
-          else
-            echo '[]' > ents.json
-          fi
-          jq -n --slurpfile p privacy.json --slurpfile e ents.json '
-            ($e[0]) as $ents | ($p[0]) as $priv
-            | (if ($ents|length) > 0 then {entitlements: $ents} else {} end)
-            + (if ($priv|length) > 0 then {privacy: $priv} else {} end)
-          ' > permissions.json
-          echo "appPermissions:"; cat permissions.json
-
-      - name: Attest IPA provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: Tower-unsigned.ipa
-
-      - name: Attach assets to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "$TAG" Tower-unsigned.ipa --clobber
-          if [ -f "Tower-${TAG}.dSYM.zip" ]; then
-            gh release upload "$TAG" "Tower-${TAG}.dSYM.zip" --clobber
-          fi
-
-      - name: Patch source.json on main
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VER: ${{ steps.ipa.outputs.version }}
-          SIZE: ${{ steps.ipa.outputs.size }}
-          SHA: ${{ steps.ipa.outputs.sha }}
-          MIN_OS: ${{ steps.ipa.outputs.min_os }}
-          DATE: ${{ steps.ipa.outputs.date }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B main origin/main
-          jq --slurpfile perms permissions.json \
-             --arg ver "$VER" --arg size "$SIZE" --arg sha "$SHA" \
-             --arg min "$MIN_OS" --arg date "$DATE" --arg tag "$TAG" \
-             --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Tower-unsigned.ipa" '
-            ($perms[0] // {}) as $p
-            | .apps[0].size = ($size|tonumber)
-            | .apps[0].versionDate = $date
-            | .apps[0].minOSVersion = $min
-            | .apps[0].sha256 = $sha
-            | .apps[0].downloadURL = $url
-            | (if ($p|length) > 0 then .apps[0].appPermissions = $p else . end)
-            | .apps[0].versions = (
-                [{
-                  version: $ver,
-                  date: $date,
-                  localizedDescription: ("Release " + $tag + "."),
-                  downloadURL: $url,
-                  size: ($size|tonumber),
-                  minOSVersion: $min,
-                  sha256: $sha
-                } + (if ($p|length) > 0 then {appPermissions: $p} else {} end)]
-                + ((.apps[0].versions // []) | map(select(.version != $ver)))
-                | .[0:10]
-              )
-          ' source.json > source.json.new
-          mv source.json.new source.json
-          git add source.json
-          git diff --cached --quiet && { echo "source.json unchanged"; exit 0; }
-          git commit -m "chore(source): sync ${TAG} metadata [skip ci]"
-          git push origin main
+          tag: ${{ env.TAG }}
+          version: ${{ needs.release-please.outputs.version }}

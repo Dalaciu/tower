@@ -1,0 +1,25 @@
+{
+  "name": "Dalaciu Tower",
+  "identifier": "com.dalaciu.altstore.tower",
+  "sourceURL": "https://raw.githubusercontent.com/Dalaciu/tower/main/source.json",
+  "apps": [
+    {
+      "name": "Tower",
+      "bundleIdentifier": "com.cunderw.tower",
+      "developerName": "cunderw (fork: Dalaciu)",
+      "subtitle": "Unraid client",
+      "localizedDescription": "Native iOS Unraid server client. Monitors array health, Docker containers, VMs, and media services (Sonarr, Radarr, Lidarr, Prowlarr, Overseerr, Tautulli) over Unraid's GraphQL API.",
+      "iconURL": "https://raw.githubusercontent.com/Dalaciu/tower/main/docs/app-store-assets/icon.png",
+      "tintColor": "007AFF",
+      "category": "utilities",
+      "screenshotURLs": [],
+      "version": "0.0.0",
+      "versionDate": "1970-01-01T00:00:00Z",
+      "versionDescription": "Placeholder. Will be updated by the release-ipa workflow on first tag.",
+      "downloadURL": "https://github.com/Dalaciu/tower/releases/latest/download/Tower-unsigned.ipa",
+      "size": 0,
+      "versions": []
+    }
+  ],
+  "news": []
+}

@@ -30,7 +30,7 @@ jobs:
   build-ipa:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 60
     permissions:
       contents: write
@@ -42,71 +42,83 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Select newest Xcode
-        run: |
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)" || true
-          xcodebuild -version
-
       - name: Sync MARKETING_VERSION to tag
-        run: |
-          sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${VERSION};/g" Tower.xcodeproj/project.pbxproj
-          grep -o 'MARKETING_VERSION = [^;]*;' Tower.xcodeproj/project.pbxproj | sort -u
+        run: sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${VERSION};/g" Tower.xcodeproj/project.pbxproj
 
-      - name: Build unsigned .app
+      - name: Build unsigned IPA
         run: |
           set -o pipefail
-          mkdir -p build
           xcodebuild \
             -project Tower.xcodeproj -scheme Tower \
             -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM="" \
-            clean build 2>&1 | tee build/build.log
-
-      - name: Wrap into IPA
-        run: |
-          APP="$(ls -d build/Build/Products/Release-iphoneos/Tower.app | head -1)"
-          [ -d "$APP" ] || { echo "::error::no .app produced"; exit 1; }
-          mkdir -p Payload
-          cp -R "$APP" Payload/
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS="" DEVELOPMENT_TEAM="" \
+            clean build
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Tower.app Payload/
           zip -qry Tower-unsigned.ipa Payload
-          ls -lh Tower-unsigned.ipa
+
+      - name: Extract IPA metadata
+        id: ipa
+        run: |
+          INFO=Payload/Tower.app/Info.plist
+          VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO")
+          BID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO")
+          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$INFO")
+          SIZE=$(stat -f%z Tower-unsigned.ipa)
+          SHA=$(shasum -a 256 Tower-unsigned.ipa | cut -d' ' -f1)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "version=$VER"
+            echo "build=$BUILD"
+            echo "bundle_id=$BID"
+            echo "min_os=$MIN_OS"
+            echo "size=$SIZE"
+            echo "sha=$SHA"
+            echo "date=$DATE"
+          } | tee -a "$GITHUB_OUTPUT"
 
       - name: Attach IPA to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" Tower-unsigned.ipa --clobber
 
-      - name: Patch source.json metadata on main
+      - name: Patch source.json on main
         env:
           GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.ipa.outputs.version }}
+          SIZE: ${{ steps.ipa.outputs.size }}
+          SHA: ${{ steps.ipa.outputs.sha }}
+          MIN_OS: ${{ steps.ipa.outputs.min_os }}
+          DATE: ${{ steps.ipa.outputs.date }}
         run: |
-          SIZE=$(stat -f%z Tower-unsigned.ipa)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout -B main origin/main
-          jq --arg size "$SIZE" --arg date "$DATE" --arg ver "$VERSION" \
-             '.apps[0].size = ($size|tonumber)
-              | .apps[0].versionDate = $date
-              | .apps[0].versions = ([{
-                  version: $ver,
-                  date: $date,
-                  localizedDescription: ("AltStore release " + $ver + "."),
-                  downloadURL: .apps[0].downloadURL,
-                  size: ($size|tonumber)
-                }] + (.apps[0].versions // [] | map(select(.version != $ver))))' \
-             source.json > source.json.new
+          jq --arg ver "$VER" --arg size "$SIZE" --arg sha "$SHA" \
+             --arg min "$MIN_OS" --arg date "$DATE" --arg tag "$TAG" \
+             --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Tower-unsigned.ipa" '
+            .apps[0].size = ($size|tonumber)
+            | .apps[0].versionDate = $date
+            | .apps[0].minOSVersion = $min
+            | .apps[0].sha256 = $sha
+            | .apps[0].downloadURL = $url
+            | .apps[0].versions = ([{
+                version: $ver,
+                date: $date,
+                localizedDescription: ("Release " + $tag + "."),
+                downloadURL: $url,
+                size: ($size|tonumber),
+                minOSVersion: $min,
+                sha256: $sha
+              }] + ((.apps[0].versions // []) | map(select(.version != $ver))))
+          ' source.json > source.json.new
           mv source.json.new source.json
           git add source.json
-          if git diff --cached --quiet; then
-            echo "source.json unchanged"; exit 0
-          fi
-          git commit -m "chore(source): sync $TAG metadata [skip ci]"
+          git diff --cached --quiet && { echo "source.json unchanged"; exit 0; }
+          git commit -m "chore(source): sync ${TAG} metadata [skip ci]"
           git push origin main

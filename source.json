@@ -13,7 +13,7 @@
       "tintColor": "007AFF",
       "category": "utilities",
       "screenshotURLs": [],
-      "version": "2.1.0",
+      "version": "2.2.0",
       "versionDate": "2026-11-08T17:24:49Z",
       "versionDescription": "Placeholder. Will be updated by the release-ipa workflow on first tag.",
       "downloadURL": "https://github.com/Dalaciu/tower/releases/download/v2.1.0/Tower-unsigned.ipa",

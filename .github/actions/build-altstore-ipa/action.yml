@@ -37,6 +37,27 @@ inputs:
 runs:
   using: composite
   steps:
+    # Key cache off the committed pbxproj (and both Package.resolved files)
+    # BEFORE the MARKETING_VERSION rewrite, so a routine version bump does
+    # not invalidate the module cache. xcodebuild `clean` drops the per-target
+    # Build/ dir inside -derivedDataPath but leaves SourcePackages/ and
+    # ModuleCache.noindex intact, so both survive clean build.
+    - name: Cache SwiftPM checkouts
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: build/SourcePackages
+        key: ${{ runner.os }}-xcode27-spm-${{ hashFiles('Tower.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'TowerKit/Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-xcode27-spm-
+
+    - name: Cache Swift module cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: build/ModuleCache.noindex
+        key: ${{ runner.os }}-xcode27-modulecache-${{ hashFiles('Tower.xcodeproj/project.pbxproj', 'Tower.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'TowerKit/Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-xcode27-modulecache-
+
     - name: Sync MARKETING_VERSION to tag
       shell: bash
       env:

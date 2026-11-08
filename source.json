@@ -14,11 +14,25 @@
       "category": "utilities",
       "screenshotURLs": [],
       "version": "2.2.0",
-      "versionDate": "2026-11-08T17:24:49Z",
+      "versionDate": "2026-11-08T22:33:57Z",
       "versionDescription": "Placeholder. Will be updated by the release-ipa workflow on first tag.",
-      "downloadURL": "https://github.com/Dalaciu/tower/releases/download/v2.1.0/Tower-unsigned.ipa",
-      "size": 4596985,
+      "downloadURL": "https://github.com/Dalaciu/tower/releases/download/v2.2.0/Tower-unsigned.ipa",
+      "size": 4602064,
       "versions": [
+        {
+          "version": "2.2.0",
+          "date": "2026-11-08T22:33:57Z",
+          "localizedDescription": "Release v2.2.0.",
+          "downloadURL": "https://github.com/Dalaciu/tower/releases/download/v2.2.0/Tower-unsigned.ipa",
+          "size": 4602064,
+          "minOSVersion": "26.0",
+          "sha256": "cfc4d0d7347cd28d73f6100cb9831890f278ec853e1bfea2e44e5732b220a58b",
+          "appPermissions": {
+            "privacy": {
+              "NSLocalNetworkUsageDescription": "Tower connects to your Unraid server on your local network to show its status, such as array health and disk temperatures, and to start or stop Docker containers and virtual machines."
+            }
+          }
+        },
         {
           "version": "2.1.0",
           "date": "2026-11-08T17:24:49Z",
@@ -35,7 +49,7 @@
         }
       ],
       "minOSVersion": "26.0",
-      "sha256": "ebc9f91b318fa1556538b1a7875d7f28ad301bd213043ba9abc0b5bd8146fc14",
+      "sha256": "cfc4d0d7347cd28d73f6100cb9831890f278ec853e1bfea2e44e5732b220a58b",
       "appPermissions": {
         "privacy": {
           "NSLocalNetworkUsageDescription": "Tower connects to your Unraid server on your local network to show its status, such as array health and disk temperatures, and to start or stop Docker containers and virtual machines."

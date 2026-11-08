@@ -78,6 +78,17 @@ jobs:
             echo "::warning::no dSYM produced; skipping"
           fi
 
+      - name: Upload IPA and dSYM as job artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tower-${{ env.TAG }}
+          path: |
+            Tower-unsigned.ipa
+            Tower-${{ env.TAG }}.dSYM.zip
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Extract IPA metadata
         id: ipa
         run: |
@@ -100,7 +111,41 @@ jobs:
           } | tee -a "$GITHUB_OUTPUT"
 
       - name: Extract appPermissions from IPA
-        run: python3 .github/scripts/extract_permissions.py Payload/Tower.app permissions.json
+        run: |
+          # Inlined so the extractor travels with the workflow YAML (main)
+          # instead of the checked-out tag. Keeps rebuild_tag working for
+          # releases cut before the script existed. The `if True:` wrapper
+          # exists so Python accepts the YAML-indented heredoc.
+          python3 - Payload/Tower.app permissions.json <<'PY'
+          if True:
+              import json, plistlib, struct, sys
+              from pathlib import Path
+              ENT_MAGIC = 0xFADE7171
+              TEAM_LEAKING = {"application-identifier", "com.apple.developer.team-identifier"}
+              app, out = Path(sys.argv[1]), Path(sys.argv[2])
+              info = app / "Info.plist"
+              plist = plistlib.loads(info.read_bytes()) if info.exists() else {}
+              privacy = {k: v for k, v in plist.items()
+                         if k.startswith("NS") and k.endswith("UsageDescription")}
+              entitlements = []
+              exec_name = plist.get("CFBundleExecutable")
+              if exec_name and (app / exec_name).exists():
+                  data = (app / exec_name).read_bytes()
+                  idx = data.find(struct.pack(">I", ENT_MAGIC))
+                  if idx != -1:
+                      length = struct.unpack(">I", data[idx + 4 : idx + 8])[0]
+                      payload = data[idx + 8 : idx + length].rstrip(b"\x00")
+                      try:
+                          ents = plistlib.loads(payload)
+                          entitlements = sorted(k for k in ents if k not in TEAM_LEAKING)
+                      except plistlib.InvalidFileException:
+                          pass
+              permissions = {}
+              if entitlements: permissions["entitlements"] = entitlements
+              if privacy: permissions["privacy"] = privacy
+              out.write_text(json.dumps(permissions, indent=2, sort_keys=True))
+              print(f"appPermissions: {len(entitlements)} entitlements, {len(privacy)} privacy keys")
+          PY
 
       - name: Attest IPA provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

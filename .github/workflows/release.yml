@@ -44,9 +44,16 @@ jobs:
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.rebuild_tag }}
     steps:
-      # Composite action lives on main. Check it out into a side path so
-      # the main workspace can hold the tag source tree without clobbering
-      # the action for rebuild_tag runs that target older tags.
+      # Order matters: the tag checkout runs `git clean -ffdx` at the
+      # workspace root, which would wipe a prior sibling checkout.
+      # Check out the tag source first (workspace root), then the CI
+      # action into a nested path whose own `git clean` is scoped to
+      # that subdir, so the tag source stays intact.
+      - name: Checkout tag source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.TAG }}
+
       - name: Checkout CI action from main
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -54,11 +61,6 @@ jobs:
           sparse-checkout: .github/actions
           sparse-checkout-cone-mode: false
           path: __ci__
-
-      - name: Checkout tag source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ env.TAG }}
 
       - name: Build + attest + publish
         uses: ./__ci__/.github/actions/build-altstore-ipa

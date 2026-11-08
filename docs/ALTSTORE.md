@@ -1,11 +1,28 @@
 # AltStore source for this fork
 
 This fork publishes an unsigned IPA plus an AltStore source manifest so you can sideload
-Tower on your iPhone with AltStore or SideStore. No Apple Developer Program needed.
+Tower on your iPhone with **AltStore Classic** or **SideStore**. No Apple Developer
+Program needed.
+
+## Which client
+
+The source is for **AltStore Classic** (worldwide, free Apple ID, 7-day re-sign) or
+**SideStore** (maintained AltStore-Classic fork, same source format). It is **not**
+compatible with **AltStore PAL**, the EU DMA alternative marketplace: PAL only installs
+Apple-notarized apps and requires every entry to carry a Apple-assigned `marketplaceID`.
+If you see the error
+
+> One or more apps in source "Dalaciu Tower" are missing a marketplaceID. This most likely
+> means they are not notarized, which is not supported by this version of AltStore.
+
+you are on AltStore PAL. Switch to AltStore Classic or SideStore:
+
+- AltStore Classic: https://altstore.io/download — "AltStore Classic" button, not PAL.
+- SideStore: https://sidestore.io.
 
 ## Source URL
 
-Add to AltStore → Browse → Sources → `+`:
+Add to the client → Browse → Sources → `+`:
 
 ```
 https://raw.githubusercontent.com/Dalaciu/tower/main/source.json
@@ -26,11 +43,13 @@ automatically. No manual tagging.
    `.release-please-manifest.json`, `CHANGELOG.md`, and `source.json`'s
    `apps[0].version`.
 3. Merging that PR creates tag `vX.Y.Z` and a GitHub Release.
-4. The same `release.yml` workflow runs the `build-ipa` job, builds an unsigned IPA on
-   `macos-latest`, attaches it to the release, and patches `source.json` with
-   `size`, `versionDate`, and a new entry in `versions[]`.
-5. AltStore picks up the new `source.json` and re-signs the IPA against your free
-   Apple ID at install time.
+4. The same `release.yml` workflow runs the `build-ipa` job on the `xcode-27` runner,
+   builds an unsigned IPA, extracts metadata (version, bundle id, min OS, size, sha256,
+   `appPermissions` from Info.plist + Mach-O entitlements), publishes SLSA build
+   provenance via `actions/attest-build-provenance`, uploads the IPA and a zipped
+   `.dSYM` to the release, and patches `source.json` with the new entry.
+5. AltStore Classic / SideStore picks up the new `source.json` and re-signs the IPA
+   against your free Apple ID at install time.
 
 ## One-time setup
 

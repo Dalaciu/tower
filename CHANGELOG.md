@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/Dalaciu/tower/compare/v2.2.0...v2.2.1) (2026-11-08)
+
+
+### Reverts
+
+* trust self-signed TLS on private hosts ([#8](https://github.com/Dalaciu/tower/issues/8)) ([32c5a47](https://github.com/Dalaciu/tower/commit/32c5a475d358db6cd149394fc367014ab61f01c3)), closes [#7](https://github.com/Dalaciu/tower/issues/7)
+
 ## [2.2.0](https://github.com/Dalaciu/tower/compare/v2.1.0...v2.2.0) (2026-11-08)
 
 

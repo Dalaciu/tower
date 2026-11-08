@@ -24,7 +24,6 @@ jobs:
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
-      version: ${{ steps.rp.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: rp
@@ -66,4 +65,3 @@ jobs:
         uses: ./__ci__/.github/actions/build-altstore-ipa
         with:
           tag: ${{ env.TAG }}
-          version: ${{ needs.release-please.outputs.version }}

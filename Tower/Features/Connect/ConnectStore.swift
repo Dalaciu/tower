@@ -8,10 +8,6 @@ import TowerData
 final class ConnectStore: LoadingStore {
   var urlText: String = ""
   var apiKey: String = ""
-  /// User opt-in to trust a self-signed TLS certificate for this server.
-  /// Off by default — every connection runs the OS's normal trust evaluation
-  /// unless the user explicitly flips this on. See `SelfSignedTrustDelegate`.
-  var trustsSelfSignedCertificate: Bool = false
   var state: Loadable<Server> = .idle
 
   /// The one line `LoadingStore` needs per store — see `LoadTracker`.
@@ -30,8 +26,7 @@ final class ConnectStore: LoadingStore {
 
   convenience init(serverStore: any ServerStoring = KeychainServerStore()) {
     self.init(serverStore: serverStore) { server in
-      LiveSystemRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveSystemRepository(provider: ApolloClientProvider(server: server))
     }
   }
 
@@ -46,12 +41,7 @@ final class ConnectStore: LoadingStore {
       state = .failed(.invalidServerURL)
       return
     }
-    let server = Server(
-      name: url.host() ?? "Tower",
-      url: url,
-      apiKey: apiKey.trimmed,
-      trustsSelfSignedCertificate: trustsSelfSignedCertificate
-    )
+    let server = Server(name: url.host() ?? "Tower", url: url, apiKey: apiKey.trimmed)
 
     // `[self]` because `load` takes an escaping closure — it wraps the work
     // in a cancellable `Task`. Everything captured is main-actor

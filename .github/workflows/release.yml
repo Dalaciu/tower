@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      rebuild_tag:
+        description: "Existing release tag to rebuild the IPA for (e.g. v2.1.0). Leave empty to let release-please decide."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -29,13 +34,13 @@ jobs:
 
   build-ipa:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.release_created == 'true' || inputs.rebuild_tag != ''
     runs-on: xcode-27
     timeout-minutes: 60
     permissions:
       contents: write
     env:
-      TAG: ${{ needs.release-please.outputs.tag_name }}
+      TAG: ${{ needs.release-please.outputs.tag_name || inputs.rebuild_tag }}
       VERSION: ${{ needs.release-please.outputs.version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -43,7 +48,9 @@ jobs:
           ref: ${{ env.TAG }}
 
       - name: Sync MARKETING_VERSION to tag
-        run: sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${VERSION};/g" Tower.xcodeproj/project.pbxproj
+        run: |
+          V="${VERSION:-${TAG#v}}"
+          sed -i '' -E "s/MARKETING_VERSION = [0-9A-Za-z.\-]+;/MARKETING_VERSION = ${V};/g" Tower.xcodeproj/project.pbxproj
 
       - name: Build unsigned IPA
         run: |

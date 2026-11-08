@@ -115,6 +115,35 @@ struct ConnectStoreTests {
     #expect(ConnectStore.normalizedURL(from: "ftp://192.0.2.10") == nil)
   }
 
+  // The flag on the store has to reach the `Server` written to the store —
+  // otherwise a user who flipped the toggle would still see the system trust
+  // check reject their self-signed cert on the next connect, because the
+  // saved server (which the delegate reads) says `false`.
+  @Test func savesTheTrustSelfSignedFlagWhenOn() async throws {
+    let serverStore = InMemoryServerStore()
+    let store = makeStore(
+      repository: StubSystemRepository(result: .success(true)),
+      store: serverStore
+    )
+    store.urlText = "https://nas:444"
+    store.apiKey = "abc"
+    store.trustsSelfSignedCertificate = true
+    await store.connect()
+    #expect(try serverStore.load()?.trustsSelfSignedCertificate == true)
+  }
+
+  @Test func defaultsTheTrustSelfSignedFlagToOff() async throws {
+    let serverStore = InMemoryServerStore()
+    let store = makeStore(
+      repository: StubSystemRepository(result: .success(true)),
+      store: serverStore
+    )
+    store.urlText = "http://192.0.2.10"
+    store.apiKey = "abc"
+    await store.connect()
+    #expect(try serverStore.load()?.trustsSelfSignedCertificate == false)
+  }
+
   // The only thing preventing a double-tap from racing
   // `KeychainServerStore`'s check-then-act save path — regressing
   // either half of this condition reopens that race.

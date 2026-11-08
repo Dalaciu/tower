@@ -80,10 +80,7 @@ public enum AppError: Error, Equatable, Sendable {
       // only ever right for one person's network.
       "Include http:// or https:// and the server's address or hostname."
     case .insecureConnection:
-      // Unraid servers often use a self-signed certificate. The Connect
-      // screen has a per-server opt-in that bypasses the system trust
-      // check for exactly that case — see `SelfSignedTrustDelegate`.
-      "Unraid servers often use a self-signed certificate. Turn on \"Trust self-signed certificate\" on the Connect screen, or use the http:// address."
+      "Unraid servers often use a self-signed certificate. Try the http:// address instead of https://."
     case .actionRefused:
       // Deliberately not "the VM may already be…": `AppError` is shared by
       // every feature, and a case that names one of them would read wrong the

@@ -35,16 +35,6 @@ struct ConnectView: View {
           Text("Create an API key in Unraid under Settings ▸ Management Access.")
         }
 
-        Section {
-          Toggle("Trust self-signed certificate", isOn: $store.trustsSelfSignedCertificate)
-            .accessibilityIdentifier("connect.trustSelfSigned")
-        } footer: {
-          // Scoped to this one server. The TLS bypass only activates when
-          // the saved server has the flag on, so a later `https://` entry
-          // with the toggle off still runs the OS's normal trust check.
-          Text("Only enable for servers on your private network. Unraid's default certificate is self-signed.")
-        }
-
         if let error = store.state.error {
           Section {
             ContentUnavailableView {

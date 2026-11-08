@@ -30,28 +30,22 @@ struct AppEnvironment {
   static let live = AppEnvironment(
     serverStore: KeychainServerStore(),
     makeRepository: { server in
-      LiveSystemRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveSystemRepository(provider: ApolloClientProvider(server: server))
     },
     makeDockerRepository: { server in
-      LiveDockerRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveDockerRepository(provider: ApolloClientProvider(server: server))
     },
     makeVMRepository: { server in
-      LiveVMRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveVMRepository(provider: ApolloClientProvider(server: server))
     },
     makeShareRepository: { server in
-      LiveShareRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveShareRepository(provider: ApolloClientProvider(server: server))
     },
     makeNotificationRepository: { server in
-      LiveNotificationRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveNotificationRepository(provider: ApolloClientProvider(server: server))
     },
     makeLogRepository: { server in
-      LiveLogRepository(provider: ApolloClientProvider(
-        server: server, sessionDelegate: SelfSignedTrustDelegate(server: server)))
+      LiveLogRepository(provider: ApolloClientProvider(server: server))
     },
     serviceDirectory: ServiceDirectory.keychain(),
     serviceStatusChecker: LiveServiceStatusChecker(),

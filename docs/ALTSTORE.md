@@ -13,32 +13,43 @@ https://raw.githubusercontent.com/Dalaciu/tower/main/source.json
 
 ## How releases work
 
-1. Push a tag matching `v*` on `main` (or run the `Release unsigned IPA` workflow by hand).
-2. `.github/workflows/release-ipa.yml` builds an unsigned IPA on `macos-latest`, creates a
-   GitHub release, attaches `Tower-unsigned.ipa`, and rewrites `source.json` so
-   AltStore picks the new version up.
-3. AltStore re-signs the IPA against your free Apple ID on install and re-sign events.
+The repo uses [release-please](https://github.com/googleapis/release-please) and
+[Conventional Commits](https://www.conventionalcommits.org/) to compute versions
+automatically. No manual tagging.
+
+1. Commits to `main` use conventional messages:
+   - `feat: …` → minor bump (e.g. 2.0.4 → 2.1.0)
+   - `fix: …` → patch bump (2.0.4 → 2.0.5)
+   - `feat!: …` or footer `BREAKING CHANGE:` → major bump (2.0.4 → 3.0.0)
+   - `chore: …` / `docs: …` / `ci: …` → no release
+2. `release-please` opens or updates a "chore: release X.Y.Z" PR that bumps
+   `.release-please-manifest.json`, `CHANGELOG.md`, and `source.json`'s
+   `apps[0].version`.
+3. Merging that PR creates tag `vX.Y.Z` and a GitHub Release.
+4. The same `release.yml` workflow runs the `build-ipa` job, builds an unsigned IPA on
+   `macos-latest`, attaches it to the release, and patches `source.json` with
+   `size`, `versionDate`, and a new entry in `versions[]`.
+5. AltStore picks up the new `source.json` and re-signs the IPA against your free
+   Apple ID at install time.
 
 ## One-time setup
 
-- **Enable Actions on the fork.** GitHub disables workflows on forks by default.
-  Open Actions tab → "I understand my workflows, go ahead and enable them."
-- **Change `DEVELOPMENT_TEAM`** in `Tower.xcodeproj/project.pbxproj` to your own
-  team ID before the first local Xcode build if you also want to build in Xcode. The
-  release workflow builds with signing disabled, so the stock value does not block CI.
-- **Change `PRODUCT_BUNDLE_IDENTIFIER`** if you have the upstream Tower from the App
-  Store installed. Keeping the same bundle id as the store build makes AltStore replace it
-  on install.
-- **(Optional) Host via GitHub Pages** if you want a prettier URL. Settings → Pages →
-  deploy from `main` branch, `/` directory. The raw URL above works without Pages.
+- **Actions enabled.** Already on.
+- **Change `DEVELOPMENT_TEAM`** in `Tower.xcodeproj/project.pbxproj` to your own team id
+  only if you also want to build locally in Xcode. The release workflow builds with
+  signing disabled, so the stock value is fine for CI.
+- **Change `PRODUCT_BUNDLE_IDENTIFIER`** if you have the upstream Tower installed from
+  the App Store and want them side by side. Same bundle id replaces the store build.
 
 ## Xcode version caveat
 
-The project targets iOS 26 and Swift 6, which need Xcode 27. `macos-latest` GitHub-hosted
-runners may not yet ship Xcode 27. If the workflow fails at the build step, either:
+The project targets iOS 26 + Swift 6, which needs Xcode 27. `macos-latest` on GitHub-
+hosted runners may not ship Xcode 27 yet. If `build-ipa` fails at the build step, either:
 
-- Wait for GitHub to add a `macos-26` runner image with Xcode 27, or
-- Build the IPA locally with the script below and attach it to a release by hand.
+- wait for a `macos-26` runner image, or
+- build the IPA locally with the script below and attach it to the existing release by
+  hand with `gh release upload vX.Y.Z Tower-unsigned.ipa`. The `source.json` patch step
+  can be re-run by pushing an empty commit to `main`.
 
 ## Local unsigned IPA build (fallback)
 
@@ -57,10 +68,7 @@ cp -R build/Build/Products/Release-iphoneos/Tower.app Payload/
 zip -qry Tower-unsigned.ipa Payload
 ```
 
-Then: GitHub UI → Releases → Draft a new release → tag `v2.0.4-unsigned.1` → attach
-`Tower-unsigned.ipa` → publish. `source.json` on `main` needs the `downloadURL`, `version`,
-`size`, `versionDate` fields updated to match.
-
 ## PAT scopes for the workflow
 
-`${{ github.token }}` has all it needs. No extra secrets.
+`${{ github.token }}` is enough for release-please and the IPA upload. No extra secrets
+required.
